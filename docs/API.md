@@ -247,6 +247,7 @@ Ollama API와 호환되는 엔드포인트입니다.
 - `template` (선택): 프롬프트 템플릿
 - `context` (선택): 이전 응답에서 받은 컨텍스트 토큰 배열. 연속된 대화를 유지하려는 경우에만 사용. 단발성 요청에서는 생략 가능.
 - `raw` (선택): 원시 모드
+- `format` (선택): 응답 형식. `"json"`을 지정하면 JSON 구조화 응답 요청. 기본값: `null`
 
 **요청 예시 (비스트리밍):**
 ```bash
@@ -356,6 +357,7 @@ curl -N -X POST http://localhost:8000/api/generate \
   - `images` (선택): 이미지 URL 배열
 - `stream` (선택): 스트리밍 응답 여부
 - `options` (선택): 모델 옵션
+- `format` (선택): 응답 형식. `"json"`을 지정하면 JSON 구조화 응답 요청. 기본값: `null`
 
 **요청 예시:**
 ```bash

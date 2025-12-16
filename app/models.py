@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from enum import Enum
 
@@ -39,6 +39,8 @@ class OllamaGenerateRequest(BaseModel):
     template: Optional[str] = None
     context: Optional[List[int]] = None
     raw: bool = False
+    # Optional response format (e.g., json)
+    format: Optional[Literal["json"]] = None
 
 class OllamaChatMessage(BaseModel):
     role: str
@@ -50,6 +52,8 @@ class OllamaChatRequest(BaseModel):
     messages: List[OllamaChatMessage]
     stream: bool = False
     options: Optional[Dict[str, Any]] = None
+    # Optional response format (e.g., json)
+    format: Optional[Literal["json"]] = None
 
 class UsageRecord(BaseModel):
     username: str
