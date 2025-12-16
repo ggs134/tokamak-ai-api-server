@@ -1,0 +1,15 @@
+# Example override file for development
+# Copy to docker-compose.override.yml to customize for your environment
+
+version: '3.8'
+
+services:
+  ollama-api:
+    ports:
+      # Override port mapping for development
+      - "8000:8000"
+    environment:
+      # Override environment variables
+      - LOG_LEVEL=DEBUG
+      - WORKERS=2
+
