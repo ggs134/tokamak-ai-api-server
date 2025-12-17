@@ -39,6 +39,7 @@ api_server/
 ├── docs/                   # 문서
 │   ├── API.md            # API 엔드포인트 문서
 │   ├── ARCHITECTURE.md   # 아키텍처 문서
+│   ├── DOCKER.md         # Docker 사용 가이드
 │   ├── INSTALL.md        # 설치 가이드
 │   ├── NETWORK_OPTIMIZATION.md  # 네트워크 최적화
 │   └── QUICKSTART.md     # 빠른 시작 가이드
@@ -57,23 +58,87 @@ api_server/
 └── README.md             # 프로젝트 문서
 ```
 
+## 빠른 시작
+
+### Docker 사용 (가장 간단)
+
+```bash
+# 1. 프로젝트 클론 또는 다운로드
+cd api_server
+
+# 2. 필요한 디렉토리 생성
+mkdir -p logs data
+
+# 3. 서버 시작
+docker compose up -d --build
+
+# 4. 서버 확인
+curl http://localhost:8000/health
+
+# 5. Swagger UI 접속
+# 브라우저에서 http://localhost:8000/docs 열기
+```
+
+**자세한 Docker 사용법은 [docs/DOCKER.md](docs/DOCKER.md)를 참조하세요.**
+
+### Python 직접 사용
+
+```bash
+# 1. 가상 환경 생성 및 활성화
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. 의존성 설치
+pip install -r requirements.txt
+
+# 3. 데이터베이스 초기화
+python scripts/init_db.py
+
+# 4. 서버 시작
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+자세한 내용은 아래 섹션을 참조하세요.
+
 ## 사전 요구사항
 
-- Python 3.9+
+### 필수
+- Python 3.9+ (Docker 사용 시 불필요)
 - SQLite 3 (Python에 포함됨)
 - Ollama 서버 (1개 이상)
 
+### 선택사항
+- Docker 20.10+ 및 Docker Compose 2.0+ (Docker 사용 시)
+
 ## 설치
 
-### 1. 프로젝트 클론 및 설정
+### 방법 1: Docker 사용 (권장)
+
+Docker를 사용하면 환경 설정이 간단하고 일관됩니다:
 
 ```bash
-# 프로젝트 디렉토리 생성
-mkdir tokamak-ai-api-server
-cd tokamak-ai-api-server
+# 1. 프로젝트 디렉토리로 이동
+cd api_server
 
-# 저장소에서 모든 파일 복사
-# (requirements.txt, app/, scripts/ 등)
+# 2. 필요한 디렉토리 생성
+mkdir -p logs data
+
+# 3. 서버 빌드 및 시작
+docker compose up -d --build
+
+# 4. 데이터베이스 초기화 (처음 한 번만)
+docker compose exec tokamak-ai-api python scripts/init_db.py
+```
+
+**자세한 Docker 사용법은 [docs/DOCKER.md](docs/DOCKER.md)를 참조하세요.**
+
+### 방법 2: Python 직접 설치
+
+#### 1. 프로젝트 설정
+
+```bash
+# 프로젝트 디렉토리로 이동
+cd api_server
 
 # 가상 환경 생성
 python3 -m venv venv
@@ -83,14 +148,14 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. 환경 설정
+#### 2. 환경 설정
 
 ```bash
-# 예제 환경 파일 복사
+# 예제 환경 파일 복사 (있는 경우)
 cp .env.example .env
 
 # 설정 편집
-nano .env
+nano .env  # 또는 원하는 에디터 사용
 ```
 
 `.env` 파일에서 다음을 업데이트하세요:
@@ -108,9 +173,12 @@ SECRET_KEY=$(openssl rand -hex 32)
 # 속도 제한
 DEFAULT_RATE_LIMIT=1000
 RATE_LIMIT_WINDOW=3600
+
+# 로깅
+LOG_LEVEL=INFO
 ```
 
-### 3. 데이터베이스 초기화
+#### 3. 데이터베이스 초기화
 
 ```bash
 # 데이터베이스 테이블 및 기본 관리자 계정 생성
@@ -119,16 +187,35 @@ python scripts/init_db.py
 
 이 명령은 기본 관리자 계정을 생성하고 관리자 API 키를 표시합니다. **이 키를 안전하게 저장하세요!**
 
+**참고**: Docker를 사용하는 경우, 데이터베이스 파일은 `./data` 디렉토리에 저장됩니다.
+
 ## 서버 실행
 
-### 빠른 시작 (run.sh 사용)
+### 방법 1: Docker 사용 (권장)
+
+가장 간단하고 일관된 방법입니다:
+
+```bash
+# 빌드 및 실행
+docker compose up -d --build
+
+# 상태 확인
+docker compose ps
+
+# 로그 확인
+docker compose logs -f tokamak-ai-api
+```
+
+**자세한 Docker 사용법은 [docs/DOCKER.md](docs/DOCKER.md)를 참조하세요.**
+
+### 방법 2: 빠른 시작 (run.sh 사용)
 
 ```bash
 # 스크립트 실행 권한 부여
-chmod +x run.sh
+chmod +x scripts/run.sh
 
 # 서버 시작 (의존성 및 데이터베이스 자동 확인)
-./run.sh
+./scripts/run.sh
 ```
 
 스크립트는 다음을 수행합니다:
@@ -138,17 +225,17 @@ chmod +x run.sh
 - 필요시 데이터베이스 초기화
 - 서버 시작
 
-### 개발 모드 (수동)
+### 방법 3: 개발 모드 (수동)
 
 ```bash
 # 가상 환경 활성화
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 자동 리로드로 실행
-python -m app.main
+# uvicorn으로 직접 실행 (권장)
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
-# 또는 uvicorn으로 직접 실행
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# 또는 Python으로 실행
+python main.py
 ```
 
 ### Systemd를 사용한 프로덕션 모드
@@ -169,7 +256,7 @@ Type=simple
 User=your_user
 WorkingDirectory=/path/to/tokamak-ai-api-server
 Environment="PATH=/path/to/tokamak-ai-api-server/venv/bin"
-ExecStart=/path/to/tokamak-ai-api-server/venv/bin/python -m app.main
+ExecStart=/path/to/tokamak-ai-api-server/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 Restart=always
 RestartSec=3
 
@@ -197,7 +284,7 @@ sudo journalctl -u tokamak-ai-api -f
 pip install gunicorn
 
 # 4개 워커로 실행
-gunicorn app.main:app \
+gunicorn main:app \
   --workers 4 \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000 \
@@ -366,13 +453,71 @@ curl http://localhost:8000/admin/usage/developer1?days=7 \
 
 ## 설정 옵션
 
-### 속도 제한
+### 속도 제한 (Rate Limiting)
 
-`.env` 파일을 편집하여 속도 제한 변경:
+**기본 설정: 시간당(per hour) 제한**
+
+속도 제한은 기본적으로 **시간당(1시간)** 기준으로 작동합니다.
 
 ```env
-DEFAULT_RATE_LIMIT=1000        # 기본 시간당 요청 수
-RATE_LIMIT_WINDOW=3600         # 윈도우 시간(초)
+DEFAULT_RATE_LIMIT=1000        # 기본 시간당 요청 수 (1시간에 1000개 요청)
+RATE_LIMIT_WINDOW=3600         # 윈도우 시간(초) - 기본값: 3600초 = 1시간
+```
+
+**작동 방식:**
+- 윈도우는 매 시간 정각(0분 0초)에 리셋됩니다
+- 예: 오후 2시 30분에 요청하면, 오후 3시 0분까지의 윈도우에서 카운트됩니다
+- 오후 3시 0분이 되면 카운터가 리셋되고 새로운 윈도우가 시작됩니다
+
+**윈도우 시간 변경:**
+
+다른 시간 단위로 변경하려면 `RATE_LIMIT_WINDOW`를 조정하세요:
+
+```env
+# 30분당 제한으로 변경
+RATE_LIMIT_WINDOW=1800         # 30분 = 1800초
+
+# 일일 제한으로 변경
+RATE_LIMIT_WINDOW=86400        # 24시간 = 86400초
+
+# 10분당 제한으로 변경
+RATE_LIMIT_WINDOW=600          # 10분 = 600초
+```
+
+**예시:**
+- `DEFAULT_RATE_LIMIT=1000`, `RATE_LIMIT_WINDOW=3600`: 시간당 1000개 요청
+- `DEFAULT_RATE_LIMIT=500`, `RATE_LIMIT_WINDOW=1800`: 30분당 500개 요청
+- `DEFAULT_RATE_LIMIT=10000`, `RATE_LIMIT_WINDOW=86400`: 일일 10,000개 요청
+
+**사용자별 속도 제한:**
+
+각 사용자는 개별적으로 속도 제한을 설정할 수 있습니다:
+
+```bash
+# Python 직접 사용 시
+python scripts/generate_api_key.py user1 --rate-limit 2000
+
+# Docker 사용 시 (자세한 내용은 docs/DOCKER.md 참조)
+docker compose exec tokamak-ai-api python scripts/generate_api_key.py user1 --rate-limit 2000
+```
+
+**속도 제한 확인:**
+
+```bash
+# 현재 사용량 확인
+curl http://localhost:8000/usage/me \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+응답 예시:
+```json
+{
+  "username": "kevin",
+  "rate_limit": 1000,
+  "current_hour_usage": 45,
+  "remaining": 955,
+  "recent_requests": [...]
+}
 ```
 
 ### 로드 밸런싱
@@ -490,47 +635,38 @@ WORKERS=8
 5. **로그 모니터링** - 의심스러운 활동 감시
 6. **데이터베이스 파일 권한** - SQLite 데이터베이스 파일에 적절한 권한 설정
 
-## Docker 사용 (선택사항 - 프로덕션 배포용)
+## Docker 사용
 
 > **참고**: Docker 없이도 사용할 수 있습니다! 위의 "설치" 섹션을 따라하면 Python만으로 바로 실행할 수 있습니다. Docker는 프로덕션 배포나 환경 일관성이 필요할 때 사용하세요.
 
-### Docker Compose로 실행
-
-#### 개발 모드 (Nginx 없음)
+### 빠른 시작
 
 ```bash
-# API 서버만 실행 (포트 8000 직접 접근)
-docker-compose up -d
+# 필요한 디렉토리 생성
+mkdir -p logs data
 
-# 직접 접근
+# Docker 이미지 빌드 및 서버 시작
+docker compose up -d --build
+
+# 서버 상태 확인
+docker compose ps
+
+# 헬스체크 확인
 curl http://localhost:8000/health
 ```
 
-#### 프로덕션 모드 (Nginx 포함)
+### 자세한 Docker 가이드
 
-```bash
-# nginx 리버스 프록시와 함께 시작
-docker-compose --profile production up -d
+**모든 Docker 관련 내용은 [docs/DOCKER.md](docs/DOCKER.md)를 참조하세요.**
 
-# nginx를 통해 접근 (포트 80)
-curl http://localhost/health
-
-# 또는 커스텀 포트 지정
-NGINX_HTTP_PORT=8080 docker-compose --profile production up -d
-```
-
-#### 환경 변수
-
-`.env` 파일 생성 또는 환경 변수 설정:
-
-```env
-# API 설정
-API_PORT=8000                    # 직접 API 포트 (개발)
-NGINX_HTTP_PORT=80              # Nginx HTTP 포트 (프로덕션)
-NGINX_HTTPS_PORT=443            # Nginx HTTPS 포트 (프로덕션)
-OLLAMA_SERVERS=http://host.docker.internal:11434
-SECRET_KEY=your-secret-key-here
-```
+포함된 내용:
+- 환경 변수 설정 (`.env` 파일)
+- 시크릿 키 설정
+- 데이터베이스 초기화
+- 유저(API 키) 관리
+- 유용한 Docker 명령어
+- 문제 해결
+- Nginx 설정
 
 ## Nginx 추가 (프로덕션 권장 - 선택사항)
 
@@ -538,15 +674,12 @@ Nginx는 Docker Compose 프로파일을 사용하여 선택적 서비스로 포�
 
 ### Docker Compose 사용 (권장)
 
-`docker-compose.yml`에는 `production` 프로파일로 nginx가 포함되어 있습니다:
-
 ```bash
 # nginx와 함께 시작
-docker-compose --profile production up -d
-
-# 중지
-docker-compose --profile production down
+docker compose --profile production up -d
 ```
+
+**자세한 내용은 [docs/DOCKER.md](docs/DOCKER.md#nginx-추가-프로덕션-권장---선택사항)를 참조하세요.**
 
 ### 수동 Nginx 설정
 
@@ -573,12 +706,19 @@ MIT License
 문제나 질문이 있으면 인프라 팀에 문의하거나 로그를 확인하세요:
 
 ```bash
-# 애플리케이션 로그
-sudo journalctl -u ollama-api -f
+# Docker 사용 시
+docker compose logs -f tokamak-ai-api
 
-# 액세스 로그
-tail -f /var/log/ollama-api/access.log
+# Systemd 사용 시
+sudo journalctl -u tokamak-ai-api -f
 
-# 에러 로그
-tail -f /var/log/ollama-api/error.log
+# 직접 실행 시
+# 로그는 콘솔에 출력되거나 설정된 로그 파일에 기록됩니다
+tail -f /var/log/tokamak-ai-api/server.log
+
+# Nginx 로그 (프로덕션 모드)
+docker compose logs -f nginx
+# 또는
+tail -f logs/nginx/access.log
+tail -f logs/nginx/error.log
 ```

@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   tokamak-ai-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: tokamak-ai-api-server
     # Expose port directly in development, or through nginx in production
     expose:
@@ -13,19 +15,30 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - WORKERS=4
+      - WORKERS=${WORKERS:-4}
       - OLLAMA_SERVERS=${OLLAMA_SERVERS:-http://host.docker.internal:11434}
       - DATABASE_URL=sqlite+aiosqlite:////app/data/tokamak_ai_api.db
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-key}
-      - DEFAULT_RATE_LIMIT=1000
-      - RATE_LIMIT_WINDOW=3600
-      - LOG_LEVEL=INFO
+      - DEFAULT_RATE_LIMIT=${DEFAULT_RATE_LIMIT:-1000}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-3600}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_PORT=${METRICS_PORT:-9090}
     restart: unless-stopped
     volumes:
       - ./logs:/var/log/tokamak-ai-api
       - ./data:/app/data
     networks:
       - tokamak-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Extra hosts for accessing host.docker.internal on Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # Nginx reverse proxy (production only)
   # Usage: docker-compose --profile production up -d
@@ -43,12 +56,16 @@ services:
       # SSL certificates (if using HTTPS)
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      - tokamak-ai-api
+      tokamak-ai-api:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - tokamak-network
-
-volumes:
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   tokamak-network:
