@@ -67,12 +67,42 @@ APP_DIR="/opt/tokamak-ai-api"
 sudo mkdir -p $APP_DIR
 sudo chown $USER:$USER $APP_DIR
 
+# Check if this is an update (existing installation)
+IS_UPDATE=false
+if [ -f "$APP_DIR/.env" ] && [ -d "$APP_DIR/venv" ]; then
+    IS_UPDATE=true
+    echo -e "${YELLOW}Existing installation detected. Running in update mode...${NC}"
+    echo -e "${YELLOW}Configuration and data will be preserved.${NC}"
+    read -p "Continue with update? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Update cancelled.${NC}"
+        echo -e "${GREEN}Tip: Use scripts/update.sh for safer updates.${NC}"
+        exit 0
+    fi
+fi
+
 # Copy files
 if [ -d "app" ]; then
+    # Backup existing .env if updating
+    if [ "$IS_UPDATE" = true ] && [ -f "$APP_DIR/.env" ]; then
+        cp "$APP_DIR/.env" "$APP_DIR/.env.backup.$(date +%Y%m%d_%H%M%S)"
+        echo -e "${GREEN}✓ Existing .env backed up${NC}"
+    fi
+    
     echo "Copying application files..."
     cp -r app config docs scripts tests main.py requirements.txt Dockerfile docker-compose.yml $APP_DIR/ 2>/dev/null || true
-    if [ -f ".env.example" ]; then
+    
+    # Only copy .env.example if .env doesn't exist (first install)
+    if [ ! -f "$APP_DIR/.env" ] && [ -f ".env.example" ]; then
         cp .env.example $APP_DIR/.env
+    elif [ "$IS_UPDATE" = true ] && [ -f "$APP_DIR/.env.backup."* ]; then
+        # Restore backed up .env
+        LATEST_BACKUP=$(ls -t $APP_DIR/.env.backup.* 2>/dev/null | head -1)
+        if [ -n "$LATEST_BACKUP" ]; then
+            cp "$LATEST_BACKUP" "$APP_DIR/.env"
+            echo -e "${GREEN}✓ Configuration restored${NC}"
+        fi
     fi
     echo -e "${GREEN}✓ Files copied${NC}"
 else
@@ -86,18 +116,28 @@ cd $APP_DIR
 mkdir -p data
 
 # Setup virtual environment
-echo -e "${YELLOW}[3/6] Creating Python virtual environment...${NC}"
-python3 -m venv venv
-source venv/bin/activate
-
-# Upgrade pip for better compatibility
-pip install --upgrade pip setuptools wheel
-
-# Install dependencies (may take longer on Raspberry Pi)
-echo "Installing dependencies (this may take a while on Raspberry Pi)..."
-pip install -r requirements.txt
-
-echo -e "${GREEN}✓ Virtual environment ready${NC}"
+echo -e "${YELLOW}[3/6] Setting up Python virtual environment...${NC}"
+if [ "$IS_UPDATE" = true ] && [ -d "venv" ]; then
+    echo -e "${GREEN}Existing virtual environment found. Updating dependencies...${NC}"
+    source venv/bin/activate
+    pip install --upgrade pip setuptools wheel
+    echo "Updating dependencies (this may take a while on Raspberry Pi)..."
+    pip install -r requirements.txt --upgrade
+    echo -e "${GREEN}✓ Virtual environment updated${NC}"
+else
+    echo -e "${GREEN}Creating new virtual environment...${NC}"
+    python3 -m venv venv
+    source venv/bin/activate
+    
+    # Upgrade pip for better compatibility
+    pip install --upgrade pip setuptools wheel
+    
+    # Install dependencies (may take longer on Raspberry Pi)
+    echo "Installing dependencies (this may take a while on Raspberry Pi)..."
+    pip install -r requirements.txt
+    
+    echo -e "${GREEN}✓ Virtual environment ready${NC}"
+fi
 
 # Configure environment
 echo -e "${YELLOW}[4/6] Configuring environment...${NC}"
@@ -112,14 +152,39 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Prompt for Ollama servers
-echo ""
-echo -e "${YELLOW}Enter your Ollama server URLs (comma-separated):${NC}"
-echo "Example: http://192.168.1.101:11434,http://192.168.1.102:11434"
-read -p "Ollama servers: " OLLAMA_SERVERS
-
-# Generate secret key
-SECRET_KEY=$(openssl rand -hex 32)
+# For updates, preserve existing configuration
+if [ "$IS_UPDATE" = true ]; then
+    echo -e "${GREEN}Preserving existing configuration...${NC}"
+    # Read existing values
+    EXISTING_OLLAMA_SERVERS=$(grep "^OLLAMA_SERVERS=" .env | cut -d'=' -f2- || echo "")
+    EXISTING_SECRET_KEY=$(grep "^SECRET_KEY=" .env | cut -d'=' -f2- || echo "")
+    
+    if [ -n "$EXISTING_OLLAMA_SERVERS" ]; then
+        OLLAMA_SERVERS="$EXISTING_OLLAMA_SERVERS"
+        echo -e "${GREEN}Using existing Ollama servers: $OLLAMA_SERVERS${NC}"
+    else
+        echo ""
+        echo -e "${YELLOW}Enter your Ollama server URLs (comma-separated):${NC}"
+        echo "Example: http://192.168.1.101:11434,http://192.168.1.102:11434"
+        read -p "Ollama servers: " OLLAMA_SERVERS
+    fi
+    
+    if [ -n "$EXISTING_SECRET_KEY" ]; then
+        SECRET_KEY="$EXISTING_SECRET_KEY"
+        echo -e "${GREEN}Preserving existing SECRET_KEY${NC}"
+    else
+        SECRET_KEY=$(openssl rand -hex 32)
+    fi
+else
+    # First installation - prompt for configuration
+    echo ""
+    echo -e "${YELLOW}Enter your Ollama server URLs (comma-separated):${NC}"
+    echo "Example: http://192.168.1.101:11434,http://192.168.1.102:11434"
+    read -p "Ollama servers: " OLLAMA_SERVERS
+    
+    # Generate secret key
+    SECRET_KEY=$(openssl rand -hex 32)
+fi
 
 # Determine optimal worker count based on CPU cores
 CPU_CORES=$(nproc)
@@ -152,9 +217,14 @@ fi
 
 echo -e "${GREEN}✓ Environment configured${NC}"
 
-# Initialize database
+# Initialize database (only if not updating or database doesn't exist)
 echo -e "${YELLOW}[5/6] Initializing database...${NC}"
-python scripts/init_db.py
+if [ "$IS_UPDATE" = true ] && [ -f "data/tokamak_ai_api.db" ]; then
+    echo -e "${GREEN}Existing database found. Skipping initialization.${NC}"
+    echo -e "${YELLOW}Note: Database schema will be updated automatically on startup.${NC}"
+else
+    python scripts/init_db.py
+fi
 
 # Create systemd service
 echo -e "${YELLOW}[6/6] Setting up systemd service...${NC}"
@@ -229,7 +299,20 @@ sudo chown $USER:$USER /var/log/tokamak-ai-api
 # Enable and start service
 sudo systemctl daemon-reload
 sudo systemctl enable tokamak-ai-api
-sudo systemctl start tokamak-ai-api
+
+if [ "$IS_UPDATE" = true ]; then
+    # Restart if already running, start if not
+    if systemctl is-active --quiet tokamak-ai-api 2>/dev/null; then
+        sudo systemctl restart tokamak-ai-api
+        echo -e "${GREEN}✓ Service restarted${NC}"
+    else
+        sudo systemctl start tokamak-ai-api
+        echo -e "${GREEN}✓ Service started${NC}"
+    fi
+else
+    sudo systemctl start tokamak-ai-api
+    echo -e "${GREEN}✓ Service started${NC}"
+fi
 
 # Wait a moment for service to start
 sleep 2
@@ -265,5 +348,13 @@ if [ "$NGINX_INSTALLED" = true ]; then
     echo "  2. Setup Nginx reverse proxy (optional)"
 fi
 echo "  3. Create API keys: python $APP_DIR/scripts/generate_api_key.py <username>"
+echo ""
+echo "To update the application later:"
+echo "  1. Pull latest code: cd $APP_DIR && git pull (if using git)"
+echo "  2. Run update script: ./scripts/update.sh"
+echo "  3. Or manually:"
+echo "     - Copy new files to $APP_DIR"
+echo "     - Update dependencies: source venv/bin/activate && pip install -r requirements.txt --upgrade"
+echo "     - Restart service: sudo systemctl restart tokamak-ai-api"
 echo ""
 

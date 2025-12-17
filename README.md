@@ -45,6 +45,8 @@ api_server/
 │   └── QUICKSTART.md     # 빠른 시작 가이드
 ├── scripts/                # 유틸리티 스크립트
 │   ├── deploy.sh         # 배포 스크립트
+│   ├── deploy-raspberrypi.sh  # 라즈베리파이 배포 스크립트
+│   ├── update.sh         # 애플리케이션 업데이트 스크립트
 │   ├── generate_api_key.py  # API 키 생성
 │   ├── init_db.py        # 데이터베이스 초기화
 │   └── run.sh            # 서버 시작 스크립트
@@ -290,6 +292,127 @@ gunicorn main:app \
   --bind 0.0.0.0:8000 \
   --access-logfile /var/log/tokamak-ai-api/access.log \
   --error-logfile /var/log/tokamak-ai-api/error.log
+```
+
+## 애플리케이션 업데이트
+
+코드가 업데이트되면 다음 방법 중 하나를 사용하여 애플리케이션을 업데이트할 수 있습니다.
+
+### 방법 1: update.sh 스크립트 사용 (권장)
+
+가장 안전하고 권장되는 방법입니다. 기존 설정과 데이터를 보존하면서 코드와 의존성을 업데이트합니다.
+
+```bash
+# 프로젝트 루트 디렉토리에서
+./scripts/update.sh
+```
+
+**특징:**
+- ✅ 기존 `.env` 설정 파일 자동 백업 및 보존
+- ✅ 데이터베이스 보존 (기존 데이터 유지)
+- ✅ 의존성 자동 업데이트
+- ✅ 서비스 자동 재시작
+- ✅ 헬스 체크 자동 확인
+
+**작동 방식:**
+1. 기존 설정 파일 백업
+2. 서비스 중지
+3. 새 코드 파일 복사
+4. 의존성 업데이트 (`pip install -r requirements.txt --upgrade`)
+5. 설정 파일 복원
+6. 서비스 재시작 및 상태 확인
+
+### 방법 2: deploy.sh 재실행 (업데이트 모드)
+
+`deploy.sh` 스크립트는 기존 설치를 자동으로 감지하고 업데이트 모드로 동작합니다.
+
+```bash
+# 프로젝트 루트 디렉토리에서
+./scripts/deploy.sh
+```
+
+**개선사항:**
+- 기존 설치 감지 시 업데이트 모드로 자동 전환
+- 기존 `.env` 파일 자동 백업
+- 기존 `SECRET_KEY` 및 설정 보존
+- 데이터베이스 초기화 건너뛰기 (기존 DB가 있는 경우)
+- 확인 프롬프트 제공
+
+**주의:** `deploy.sh`는 처음 설치 시에도 사용되므로, 업데이트만 필요한 경우 `update.sh` 사용을 권장합니다.
+
+### 방법 3: 수동 업데이트
+
+스크립트를 사용하지 않고 수동으로 업데이트할 수 있습니다.
+
+```bash
+# 1. 애플리케이션 디렉토리로 이동
+cd /opt/tokamak-ai-api
+
+# 2. 코드 업데이트 (Git 사용 시)
+git pull
+
+# 또는 새 파일을 수동으로 복사
+# cp -r /path/to/new/code/* .
+
+# 3. 의존성 업데이트
+source venv/bin/activate
+pip install -r requirements.txt --upgrade
+
+# 4. 서비스 재시작
+sudo systemctl restart tokamak-ai-api
+
+# 5. 상태 확인
+sudo systemctl status tokamak-ai-api
+```
+
+### Docker 환경에서 업데이트
+
+Docker를 사용하는 경우:
+
+```bash
+# 1. 최신 코드 가져오기 (Git 사용 시)
+git pull
+
+# 2. 이미지 재빌드 및 재시작
+docker compose up -d --build
+
+# 3. 상태 확인
+docker compose ps
+docker compose logs -f tokamak-ai-api
+```
+
+**자세한 Docker 업데이트 방법은 [docs/DOCKER.md](docs/DOCKER.md)를 참조하세요.**
+
+### 업데이트 전 체크리스트
+
+업데이트 전에 다음을 확인하세요:
+
+- [ ] 현재 서비스 상태 확인: `sudo systemctl status tokamak-ai-api`
+- [ ] 데이터베이스 백업 (선택사항): `cp /opt/tokamak-ai-api/data/tokamak_ai_api.db /backup/location/`
+- [ ] `.env` 파일 백업 (자동으로 수행되지만 수동 백업 권장)
+- [ ] 업데이트 후 헬스 체크: `curl http://localhost:8000/health`
+
+### 문제 발생 시 롤백
+
+업데이트 후 문제가 발생하면:
+
+```bash
+# 1. 서비스 중지
+sudo systemctl stop tokamak-ai-api
+
+# 2. 백업된 .env 파일 복원
+cd /opt/tokamak-ai-api
+cp .env.backup.YYYYMMDD_HHMMSS .env
+
+# 3. 이전 버전의 코드로 복원 (Git 사용 시)
+git checkout <previous-commit-hash>
+
+# 4. 의존성 재설치 (필요한 경우)
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 5. 서비스 재시작
+sudo systemctl start tokamak-ai-api
 ```
 
 ## API 키 관리
