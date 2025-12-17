@@ -8,12 +8,12 @@ import asyncio
 import sys
 import argparse
 from pathlib import Path
+from sqlalchemy.exc import OperationalError
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.database import AsyncSessionLocal, APIKey, generate_api_key, hash_api_key
-from app.models import UserRole
 from datetime import datetime, timezone
 
 async def create_api_key(
@@ -24,39 +24,52 @@ async def create_api_key(
 ):
     """Create a new API key"""
     
-    # Generate new API key
-    api_key = generate_api_key()
-    api_key_hash = hash_api_key(api_key)
-    
-    async with AsyncSessionLocal() as session:
-        # Create database record
-        db_key = APIKey(
-            api_key_hash=api_key_hash,
-            username=username,
-            role=role,
-            rate_limit=rate_limit,
-            description=description,
-            created_at=datetime.now(timezone.utc)
-        )
+    try:
+        # Generate new API key
+        api_key = generate_api_key()
+        api_key_hash = hash_api_key(api_key)
         
-        session.add(db_key)
-        await session.commit()
-        
-        print("\n" + "="*60)
-        print("API Key Generated Successfully!")
-        print("="*60)
-        print(f"Username:    {username}")
-        print(f"Role:        {role}")
-        print(f"Rate Limit:  {rate_limit} requests/hour")
-        print(f"API Key:     {api_key}")
-        print("="*60)
-        print("\nIMPORTANT: Save this API key securely. It will not be shown again.")
-        print("\nUsage example:")
-        print(f'curl -H "Authorization: Bearer {api_key}" \\')
-        print('     -H "Content-Type: application/json" \\')
-        print('     -d \'{"model": "deepseek-coder:33b", "prompt": "Hello", "stream": false}\' \\')
-        print('     http://your-server:8000/api/generate')
-        print()
+        async with AsyncSessionLocal() as session:
+            # Create database record
+            db_key = APIKey(
+                api_key_hash=api_key_hash,
+                username=username,
+                role=role,
+                rate_limit=rate_limit,
+                description=description,
+                created_at=datetime.now(timezone.utc)
+            )
+            
+            session.add(db_key)
+            await session.commit()
+            
+            print("\n" + "="*60)
+            print("API Key Generated Successfully!")
+            print("="*60)
+            print(f"Username:    {username}")
+            print(f"Role:        {role}")
+            print(f"Rate Limit:  {rate_limit} requests/hour")
+            print(f"API Key:     {api_key}")
+            print("="*60)
+            print("\nIMPORTANT: Save this API key securely. It will not be shown again.")
+            print("\nUsage example:")
+            print(f'curl -H "Authorization: Bearer {api_key}" \\')
+            print('     -H "Content-Type: application/json" \\')
+            print('     -d \'{"model": "deepseek-coder:33b", "prompt": "Hello", "stream": false}\' \\')
+            print('     http://your-server:8000/api/generate')
+            print()
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "no such table" in error_msg or "does not exist" in error_msg:
+            print("\n✗ Error: Database not initialized")
+            print("\nPlease run the following command first:")
+            print("  python scripts/init_db.py")
+            print("\nOr if using Docker:")
+            print("  docker compose exec tokamak-ai-api python scripts/init_db.py")
+            sys.exit(1)
+        else:
+            print(f"\n✗ Error: {e}")
+            sys.exit(1)
 
 async def main():
     parser = argparse.ArgumentParser(description='Generate API key for Ollama API server')
