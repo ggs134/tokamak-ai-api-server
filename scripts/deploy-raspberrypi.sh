@@ -137,7 +137,12 @@ echo -e "${GREEN}Detected $CPU_CORES CPU cores. Setting workers to $WORKERS${NC}
 sed -i "s|OLLAMA_SERVERS=.*|OLLAMA_SERVERS=$OLLAMA_SERVERS|" .env
 sed -i "s|SECRET_KEY=.*|SECRET_KEY=$SECRET_KEY|" .env
 sed -i "s|DATABASE_URL=.*|DATABASE_URL=sqlite+aiosqlite:////$APP_DIR/data/tokamak_ai_api.db|" .env
-sed -i "s|WORKERS=.*|WORKERS=$WORKERS|" .env
+# Ensure WORKERS is set in .env (add if not exists, update if exists)
+if grep -q "^WORKERS=" .env; then
+    sed -i "s|^WORKERS=.*|WORKERS=$WORKERS|" .env
+else
+    echo "WORKERS=$WORKERS" >> .env
+fi
 
 # Raspberry Pi optimization: Lower default rate limit if memory is limited
 if [ "$TOTAL_MEM" -lt 4096 ]; then
@@ -154,6 +159,36 @@ python scripts/init_db.py
 # Create systemd service
 echo -e "${YELLOW}[6/6] Setting up systemd service...${NC}"
 
+# Create startup wrapper script
+cat > $APP_DIR/start.sh << 'STARTEOF'
+#!/bin/bash
+set -e
+cd "$(dirname "$0")"
+source venv/bin/activate
+
+# Load .env file if it exists (systemd EnvironmentFile also loads it, but this ensures it's available)
+# systemd's EnvironmentFile handles comments automatically, but we load it here too for safety
+if [ -f .env ]; then
+    set -a
+    # Source .env file (systemd will also load it via EnvironmentFile)
+    . .env
+    set +a
+fi
+
+# Use WORKERS from environment, default to 2 for Raspberry Pi
+WORKERS=${WORKERS:-2}
+
+# Validate WORKERS is a positive integer
+if ! [[ "$WORKERS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: WORKERS must be a positive integer, got: $WORKERS" >&2
+    WORKERS=2
+fi
+
+# Start uvicorn with configured workers
+exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers "$WORKERS"
+STARTEOF
+chmod +x $APP_DIR/start.sh
+
 sudo tee /etc/systemd/system/tokamak-ai-api.service > /dev/null << EOF
 [Unit]
 Description=Tokamak AI API Server (Raspberry Pi)
@@ -164,16 +199,24 @@ Type=simple
 User=$USER
 WorkingDirectory=$APP_DIR
 Environment="PATH=$APP_DIR/venv/bin"
+# Load environment variables from .env file
+EnvironmentFile=$APP_DIR/.env
 # Raspberry Pi optimization: Lower priority
 Nice=10
 # Memory limit (optional, adjust based on your Pi's RAM)
-# MemoryMax=1G
-ExecStart=$APP_DIR/venv/bin/python $APP_DIR/main.py
+# For Pi 4 with 4GB RAM, consider: MemoryMax=2G
+# For Pi 5 with 8GB RAM, consider: MemoryMax=4G
+# MemoryMax=2G
+# Use wrapper script that handles environment variables
+ExecStart=$APP_DIR/start.sh
 Restart=always
 RestartSec=5
 # Restart more frequently on Pi to handle memory issues
 StartLimitInterval=300
 StartLimitBurst=5
+# Standard output and error logging
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
