@@ -1,5 +1,5 @@
 import httpx
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
@@ -149,9 +149,10 @@ class LoadBalancer:
         path: str,
         json_data: dict = None,
         stream: bool = False
-    ) -> httpx.Response:
+    ) -> Tuple[httpx.Response, str]:
         """
         Proxy request to backend server with automatic failover
+        Returns: (response, server_url_used)
         """
         # Update server list from config before making request
         self._update_servers_from_config()
@@ -176,6 +177,7 @@ class LoadBalancer:
             
             # Increment load counter
             server.current_load += 1
+            server_url_used = server.url  # Store the server URL used
             
             try:
                 url = f"{server.url}{path}"
@@ -206,7 +208,7 @@ class LoadBalancer:
                     # Decrement load counter
                     server.current_load -= 1
                     
-                    return response
+                    return (response, server_url_used)
                     
             except Exception as e:
                 logger.warning(f"Request to {server.url}{path} failed: {e}")

@@ -385,14 +385,12 @@ async def generate(
         # Proxy request to backend
         if request.stream:
             # Streaming response
-            response = await load_balancer.proxy_request(
+            response, server_url = await load_balancer.proxy_request(
                 method="POST",
                 path="/api/generate",
                 json_data=request.dict(),
                 stream=True
             )
-            
-            server_url = response.url.host
             
             async def generate_stream():
                 async for chunk in response.aiter_bytes():
@@ -421,14 +419,13 @@ async def generate(
             )
         else:
             # Non-streaming response
-            response = await load_balancer.proxy_request(
+            response, server_url = await load_balancer.proxy_request(
                 method="POST",
                 path="/api/generate",
                 json_data=request.dict(),
                 stream=False
             )
             
-            server_url = str(response.url)
             result = response.json()
             
             # Log usage
@@ -489,14 +486,12 @@ async def chat(
     try:
         if request.stream:
             # Streaming response
-            response = await load_balancer.proxy_request(
+            response, server_url = await load_balancer.proxy_request(
                 method="POST",
                 path="/api/chat",
                 json_data=request.dict(),
                 stream=True
             )
-            
-            server_url = str(response.url)
             
             async def generate_stream():
                 async for chunk in response.aiter_bytes():
@@ -526,14 +521,13 @@ async def chat(
             )
         else:
             # Non-streaming response
-            response = await load_balancer.proxy_request(
+            response, server_url = await load_balancer.proxy_request(
                 method="POST",
                 path="/api/chat",
                 json_data=request.dict(),
                 stream=False
             )
             
-            server_url = str(response.url)
             result = response.json()
             
             # Log usage
@@ -588,7 +582,7 @@ async def list_models(user: Optional[User] = Depends(get_optional_user)):
     """List available models"""
     
     try:
-        response = await load_balancer.proxy_request(
+        response, _ = await load_balancer.proxy_request(
             method="GET",
             path="/api/tags",
             stream=False
