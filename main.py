@@ -9,6 +9,7 @@ import httpx
 import logging
 import json
 import time
+import asyncio
 
 from app.config import settings
 from app.models import (
@@ -579,17 +580,69 @@ async def chat(
 
 @app.get("/api/tags")
 async def list_models(user: Optional[User] = Depends(get_optional_user)):
-    """List available models"""
+    """List available models from all healthy servers"""
     
-    try:
-        response, _ = await load_balancer.proxy_request(
-            method="GET",
-            path="/api/tags",
-            stream=False
-        )
-        return response.json()
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Backend error: {str(e)}")
+    # Get all healthy servers (or all servers if none are healthy)
+    healthy_servers = [s for s in load_balancer.servers if s.is_healthy]
+    
+    if not healthy_servers:
+        # If no healthy servers, try all servers anyway
+        healthy_servers = load_balancer.servers
+        if not healthy_servers:
+            raise HTTPException(status_code=503, detail="No servers configured")
+    
+    # Collect models from all servers
+    all_models = []
+    model_map = {}  # Track unique models by name to avoid duplicates
+    
+    async def fetch_models_from_server(server_url: str) -> tuple[str, list]:
+        """Fetch models from a single server"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{server_url}/api/tags")
+                if response.status_code == 200:
+                    data = response.json()
+                    return (server_url, data.get("models", []))
+                return (server_url, [])
+        except Exception as e:
+            logger.warning(f"Failed to get models from {server_url}: {e}")
+            return (server_url, [])
+    
+    # Fetch from all servers in parallel
+    tasks = [fetch_models_from_server(server.url) for server in healthy_servers]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Process results
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        if not result:
+            continue
+            
+        server_url, server_models = result
+        
+        # Add models with server info
+        for model in server_models:
+            model_name = model.get("name", "")
+            if model_name:
+                if model_name not in model_map:
+                    # First time seeing this model
+                    model_with_server = model.copy()
+                    model_with_server["server"] = server_url
+                    model_map[model_name] = model_with_server
+                    all_models.append(model_with_server)
+                else:
+                    # Model already exists, add server to available servers list
+                    existing = model_map[model_name]
+                    if "servers" not in existing:
+                        existing["servers"] = [existing.get("server", "")]
+                    if server_url not in existing["servers"]:
+                        existing["servers"].append(server_url)
+    
+    if not all_models:
+        raise HTTPException(status_code=503, detail="Failed to retrieve models from any server")
+    
+    return {"models": all_models}
 
 # ============================================================================
 # USAGE STATISTICS ENDPOINTS

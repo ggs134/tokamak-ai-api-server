@@ -112,9 +112,9 @@ class LoadBalancer:
                     server.mark_failure()
                     logger.warning(f"Health check failed for {server.url}: {e}")
     
-    def get_next_server(self) -> Optional[ServerStatus]:
+    def get_next_server(self, exclude_servers: Optional[List[str]] = None) -> Optional[ServerStatus]:
         """
-        Get next available server using least connections algorithm
+        Get next available server using least connections algorithm with round-robin tie-breaking
         """
         # Filter healthy servers
         healthy_servers = [s for s in self.servers if s.is_healthy]
@@ -123,8 +123,24 @@ class LoadBalancer:
             logger.error("No healthy servers available!")
             return None
         
-        # Use least connections algorithm
-        selected_server = min(healthy_servers, key=lambda s: s.current_load)
+        # Exclude servers that were already tried
+        if exclude_servers:
+            healthy_servers = [s for s in healthy_servers if s.url not in exclude_servers]
+            if not healthy_servers:
+                return None
+        
+        # Find minimum load
+        min_load = min(s.current_load for s in healthy_servers)
+        
+        # Get all servers with minimum load
+        min_load_servers = [s for s in healthy_servers if s.current_load == min_load]
+        
+        # If multiple servers have same load, use round-robin for tie-breaking
+        if len(min_load_servers) > 1:
+            selected_server = min_load_servers[self.current_index % len(min_load_servers)]
+            self.current_index += 1
+        else:
+            selected_server = min_load_servers[0]
         
         return selected_server
     
@@ -159,21 +175,25 @@ class LoadBalancer:
         
         max_retries = len(self.servers)
         last_exception = None
+        tried_servers = []  # Track servers we've already tried
         
         for attempt in range(max_retries):
-            server = self.get_next_server()
+            server = self.get_next_server(exclude_servers=tried_servers)
             
             if not server:
                 # If no healthy servers, try all servers once
                 if attempt == 0:
                     logger.warning("No healthy servers, trying all servers anyway")
-                    all_servers = [s for s in self.servers]
+                    all_servers = [s for s in self.servers if s.url not in tried_servers]
                     if all_servers:
                         server = all_servers[attempt % len(all_servers)]
                     else:
                         raise Exception("No servers configured")
                 else:
                     raise Exception("No healthy servers available")
+            
+            # Track this server as tried
+            tried_servers.append(server.url)
             
             # Increment load counter
             server.current_load += 1
@@ -199,6 +219,10 @@ class LoadBalancer:
                             json=json_data
                         )
                     
+                    # Check response status
+                    if response.status_code >= 400:
+                        raise Exception(f"HTTP {response.status_code}: {response.text[:200]}")
+                    
                     # Calculate response time
                     response_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                     
@@ -216,7 +240,7 @@ class LoadBalancer:
                 server.current_load -= 1
                 last_exception = e
                 
-                # Try next server
+                # Try next server (already added to tried_servers)
                 continue
         
         # All servers failed
