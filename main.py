@@ -44,8 +44,22 @@ async def lifespan(app: FastAPI):
     # Initialize rate limiter
     await rate_limiter.connect()
     
+    # Log configured servers
+    logger.info(f"Configured Ollama servers: {settings.ollama_servers}")
+    logger.info(f"Load balancer has {len(load_balancer.servers)} servers")
+    for i, server in enumerate(load_balancer.servers, 1):
+        logger.info(f"  Server {i}: {server.url}")
+    
     # Start health checks
     await load_balancer.start_health_checks()
+    
+    # Log initial server status after health check
+    await asyncio.sleep(2)  # Wait for initial health check
+    status = load_balancer.get_status()
+    logger.info(f"Server status after startup: {status['healthy_servers']}/{status['total_servers']} healthy")
+    for server_info in status['servers']:
+        health_status = "healthy" if server_info['healthy'] else "unhealthy"
+        logger.info(f"  {server_info['url']}: {health_status} (fail_count: {server_info.get('fail_count', 0)})")
     
     yield
     

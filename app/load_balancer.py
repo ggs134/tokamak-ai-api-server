@@ -104,6 +104,14 @@ class LoadBalancer:
                         
                         if not server.is_healthy:
                             logger.info(f"Server {server.url} is back online")
+                        
+                        # Log model count for debugging
+                        try:
+                            data = response.json()
+                            model_count = len(data.get("models", []))
+                            logger.debug(f"Server {server.url} has {model_count} models")
+                        except:
+                            pass
                     else:
                         server.mark_failure()
                         logger.warning(f"Health check failed for {server.url}: HTTP {response.status_code}")
@@ -111,6 +119,8 @@ class LoadBalancer:
                 except Exception as e:
                     server.mark_failure()
                     logger.warning(f"Health check failed for {server.url}: {e}")
+                    # Log more details for debugging
+                    logger.debug(f"Health check error details for {server.url}: {type(e).__name__}: {str(e)}")
     
     def get_next_server(self, exclude_servers: Optional[List[str]] = None) -> Optional[ServerStatus]:
         """
