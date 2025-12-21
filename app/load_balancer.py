@@ -42,10 +42,23 @@ class LoadBalancer:
         self.health_check_task = None
         
         # Initialize servers from config
-        for server_url in settings.ollama_servers:
-            self.servers.append(ServerStatus(server_url))
+        self._update_servers_from_config()
         
         logger.info(f"Load balancer initialized with {len(self.servers)} servers")
+    
+    def _update_servers_from_config(self):
+        """Update server list from config, adding new servers if needed"""
+        config_servers = set(settings.ollama_servers)
+        existing_servers = {s.url for s in self.servers}
+        
+        # Add new servers
+        for server_url in config_servers:
+            if server_url not in existing_servers:
+                self.servers.append(ServerStatus(server_url))
+                logger.info(f"Added new server to load balancer: {server_url}")
+        
+        # Remove servers that are no longer in config (optional - keep for now)
+        # This allows graceful removal of servers
     
     async def start_health_checks(self):
         """Start periodic health checks"""
@@ -62,6 +75,9 @@ class LoadBalancer:
     
     async def _health_check_loop(self):
         """Periodic health check for all servers"""
+        # Do an immediate check on startup
+        await self._check_all_servers()
+        
         while True:
             try:
                 await asyncio.sleep(30)  # Check every 30 seconds
@@ -73,7 +89,10 @@ class LoadBalancer:
     
     async def _check_all_servers(self):
         """Check health of all servers"""
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        # Update server list from config in case it changed
+        self._update_servers_from_config()
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
             for server in self.servers:
                 try:
                     start_time = datetime.now(timezone.utc)
@@ -87,10 +106,11 @@ class LoadBalancer:
                             logger.info(f"Server {server.url} is back online")
                     else:
                         server.mark_failure()
+                        logger.warning(f"Health check failed for {server.url}: HTTP {response.status_code}")
                         
                 except Exception as e:
                     server.mark_failure()
-                    logger.debug(f"Health check failed for {server.url}: {e}")
+                    logger.warning(f"Health check failed for {server.url}: {e}")
     
     def get_next_server(self) -> Optional[ServerStatus]:
         """
@@ -133,6 +153,9 @@ class LoadBalancer:
         """
         Proxy request to backend server with automatic failover
         """
+        # Update server list from config before making request
+        self._update_servers_from_config()
+        
         max_retries = len(self.servers)
         last_exception = None
         
@@ -140,7 +163,16 @@ class LoadBalancer:
             server = self.get_next_server()
             
             if not server:
-                raise Exception("No healthy servers available")
+                # If no healthy servers, try all servers once
+                if attempt == 0:
+                    logger.warning("No healthy servers, trying all servers anyway")
+                    all_servers = [s for s in self.servers]
+                    if all_servers:
+                        server = all_servers[attempt % len(all_servers)]
+                    else:
+                        raise Exception("No servers configured")
+                else:
+                    raise Exception("No healthy servers available")
             
             # Increment load counter
             server.current_load += 1
@@ -177,7 +209,7 @@ class LoadBalancer:
                     return response
                     
             except Exception as e:
-                logger.warning(f"Request to {server.url} failed: {e}")
+                logger.warning(f"Request to {server.url}{path} failed: {e}")
                 server.mark_failure()
                 server.current_load -= 1
                 last_exception = e
