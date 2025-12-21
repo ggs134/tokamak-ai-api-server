@@ -54,25 +54,21 @@ git checkout 8d98ef2  # 최신 커밋 해시
 ```bash
 # 컨테이너 내에서 데이터베이스 마이그레이션 실행
 docker compose exec tokamak-ai-api python -c "
-import asyncio
-import sys
-sys.path.insert(0, '/app')
-from app.database import engine, Base, UsageLog
-from sqlalchemy import text
+import sqlite3
 
-async def migrate():
-    async with engine.begin() as conn:
-        # prompt 컬럼이 없으면 추가
-        try:
-            await conn.execute(text('ALTER TABLE usage_logs ADD COLUMN prompt TEXT'))
-            print('✓ prompt 컬럼 추가 완료')
-        except Exception as e:
-            if 'duplicate column' in str(e).lower():
-                print('✓ prompt 컬럼이 이미 존재합니다')
-            else:
-                raise
-
-asyncio.run(migrate())
+conn = sqlite3.connect('/app/data/tokamak_ai_api.db')
+cursor = conn.cursor()
+try:
+    cursor.execute('ALTER TABLE usage_logs ADD COLUMN prompt TEXT')
+    conn.commit()
+    print('✓ prompt 컬럼 추가 완료')
+except sqlite3.OperationalError as e:
+    if 'duplicate column' in str(e).lower():
+        print('✓ prompt 컬럼이 이미 존재합니다')
+    else:
+        raise
+finally:
+    conn.close()
 "
 ```
 
@@ -146,22 +142,29 @@ pip install -r requirements.txt --upgrade
 
 # 4. 데이터베이스 마이그레이션 (필요한 경우)
 python -c "
-import asyncio
-from app.database import engine, Base
-from sqlalchemy import text
+import sqlite3
+import os
 
-async def migrate():
-    async with engine.begin() as conn:
-        try:
-            await conn.execute(text('ALTER TABLE usage_logs ADD COLUMN prompt TEXT'))
-            print('✓ prompt 컬럼 추가 완료')
-        except Exception as e:
-            if 'duplicate column' in str(e).lower():
-                print('✓ prompt 컬럼이 이미 존재합니다')
-            else:
-                raise
+db_path = 'tokamak_ai_api.db'
+if not os.path.exists(db_path):
+    db_path = 'data/tokamak_ai_api.db'
 
-asyncio.run(migrate())
+if os.path.exists(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('ALTER TABLE usage_logs ADD COLUMN prompt TEXT')
+        conn.commit()
+        print('✓ prompt 컬럼 추가 완료')
+    except sqlite3.OperationalError as e:
+        if 'duplicate column' in str(e).lower():
+            print('✓ prompt 컬럼이 이미 존재합니다')
+        else:
+            raise
+    finally:
+        conn.close()
+else:
+    print('⚠ 데이터베이스 파일을 찾을 수 없습니다')
 "
 
 # 5. 서비스 재시작
@@ -241,16 +244,19 @@ sudo journalctl -u tokamak-ai-api -n 100
 
 # 데이터베이스 확인
 docker compose exec tokamak-ai-api python -c "
-from app.database import AsyncSessionLocal, UsageLog
-import asyncio
+import sqlite3
+import os
 
-async def check():
-    async with AsyncSessionLocal() as db:
-        from sqlalchemy import select
-        result = await db.execute(select(UsageLog).limit(1))
-        print('Database connection OK')
-
-asyncio.run(check())
+db_path = '/app/data/tokamak_ai_api.db'
+if os.path.exists(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM usage_logs')
+    count = cursor.fetchone()[0]
+    print(f'Database connection OK (usage_logs: {count} records)')
+    conn.close()
+else:
+    print('Database file not found')
 "
 ```
 
