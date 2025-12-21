@@ -58,17 +58,19 @@ import sqlite3
 
 conn = sqlite3.connect('/app/data/tokamak_ai_api.db')
 cursor = conn.cursor()
-try:
+
+# 먼저 컬럼 존재 여부 확인 (더 안전한 방법)
+cursor.execute('PRAGMA table_info(usage_logs)')
+columns = [col[1] for col in cursor.fetchall()]
+
+if 'prompt' not in columns:
     cursor.execute('ALTER TABLE usage_logs ADD COLUMN prompt TEXT')
     conn.commit()
     print('✓ prompt 컬럼 추가 완료')
-except sqlite3.OperationalError as e:
-    if 'duplicate column' in str(e).lower():
-        print('✓ prompt 컬럼이 이미 존재합니다')
-    else:
-        raise
-finally:
-    conn.close()
+else:
+    print('✓ prompt 컬럼이 이미 존재합니다')
+
+conn.close()
 "
 ```
 
@@ -152,17 +154,19 @@ if not os.path.exists(db_path):
 if os.path.exists(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    try:
+    
+    # 먼저 컬럼 존재 여부 확인 (더 안전한 방법)
+    cursor.execute('PRAGMA table_info(usage_logs)')
+    columns = [col[1] for col in cursor.fetchall()]
+    
+    if 'prompt' not in columns:
         cursor.execute('ALTER TABLE usage_logs ADD COLUMN prompt TEXT')
         conn.commit()
         print('✓ prompt 컬럼 추가 완료')
-    except sqlite3.OperationalError as e:
-        if 'duplicate column' in str(e).lower():
-            print('✓ prompt 컬럼이 이미 존재합니다')
-        else:
-            raise
-    finally:
-        conn.close()
+    else:
+        print('✓ prompt 컬럼이 이미 존재합니다')
+    
+    conn.close()
 else:
     print('⚠ 데이터베이스 파일을 찾을 수 없습니다')
 "
@@ -266,17 +270,21 @@ else:
 # 수동으로 컬럼 추가
 docker compose exec tokamak-ai-api python -c "
 import sqlite3
+
 conn = sqlite3.connect('/app/data/tokamak_ai_api.db')
 cursor = conn.cursor()
-try:
+
+# 먼저 컬럼 존재 여부 확인
+cursor.execute('PRAGMA table_info(usage_logs)')
+columns = [col[1] for col in cursor.fetchall()]
+
+if 'prompt' not in columns:
     cursor.execute('ALTER TABLE usage_logs ADD COLUMN prompt TEXT')
     conn.commit()
     print('✓ prompt 컬럼 추가 완료')
-except sqlite3.OperationalError as e:
-    if 'duplicate column' in str(e).lower():
-        print('✓ prompt 컬럼이 이미 존재합니다')
-    else:
-        raise
+else:
+    print('✓ prompt 컬럼이 이미 존재합니다')
+
 conn.close()
 "
 ```
