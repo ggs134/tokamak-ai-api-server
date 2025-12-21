@@ -146,12 +146,64 @@ pip install -r requirements.txt --upgrade
 python -c "
 import sqlite3
 import os
+import re
 
-db_path = 'tokamak_ai_api.db'
-if not os.path.exists(db_path):
-    db_path = 'data/tokamak_ai_api.db'
+# .env 파일에서 DATABASE_URL 읽기 시도
+db_path = None
+env_paths = ['.env', '/opt/tokamak-ai-api/.env', os.path.join(os.getcwd(), '.env')]
 
-if os.path.exists(db_path):
+for env_file in env_paths:
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r') as f:
+                for line in f:
+                    if line.startswith('DATABASE_URL='):
+                        # sqlite+aiosqlite:///./tokamak_ai_api.db 또는 sqlite+aiosqlite:////app/data/tokamak_ai_api.db 형식 파싱
+                        # 파일명도 동적으로 파싱
+                        match = re.search(r'sqlite\+aiosqlite:///(.+?)/([^/]+\.db)', line)
+                        if match:
+                            path_part = match.group(1)
+                            db_filename = match.group(2)
+                            
+                            # 상대 경로 처리 (./ 또는 //)
+                            if path_part.startswith('./'):
+                                path_part = path_part[2:]
+                            elif path_part.startswith('//'):
+                                path_part = path_part[1:]  # /app/data 형식
+                            
+                            # 경로 조합
+                            if path_part:
+                                db_path = os.path.join(path_part, db_filename)
+                            else:
+                                db_path = db_filename
+                            
+                            # 절대 경로가 아니면 .env 파일 기준으로 변환
+                            if not os.path.isabs(db_path):
+                                db_path = os.path.join(os.path.dirname(env_file), db_path)
+                            
+                            db_path = os.path.abspath(db_path)
+                            break
+        except Exception as e:
+            pass
+
+# .env에서 찾지 못한 경우 여러 가능한 경로 시도
+if not db_path or not os.path.exists(db_path):
+    possible_paths = [
+        'tokamak_ai_api.db',  # 현재 디렉토리
+        'data/tokamak_ai_api.db',  # data 서브디렉토리
+        '/opt/tokamak-ai-api/tokamak_ai_api.db',  # 배포 경로
+        '/opt/tokamak-ai-api/data/tokamak_ai_api.db',  # 배포 경로 (data)
+        os.path.join(os.getcwd(), 'tokamak_ai_api.db'),  # 현재 작업 디렉토리
+        os.path.join(os.getcwd(), 'data', 'tokamak_ai_api.db'),  # 현재 작업 디렉토리/data
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            db_path = os.path.abspath(path)
+            break
+
+if db_path and os.path.exists(db_path):
+    print(f'데이터베이스 파일 발견: {db_path}')
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -169,6 +221,10 @@ if os.path.exists(db_path):
     conn.close()
 else:
     print('⚠ 데이터베이스 파일을 찾을 수 없습니다')
+    print('\\n다음 방법을 시도해보세요:')
+    print('1. .env 파일의 DATABASE_URL 확인')
+    print('2. 데이터베이스 파일 위치 확인: find /opt -name tokamak_ai_api.db 2>/dev/null')
+    print('3. 수동으로 경로 지정: python -c \"import sqlite3; conn=sqlite3.connect(\\\"/path/to/tokamak_ai_api.db\\\"); ...\"')
 "
 
 # 5. 서비스 재시작
