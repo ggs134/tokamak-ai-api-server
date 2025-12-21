@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -358,15 +358,20 @@ async def log_usage(
     duration_ms: Optional[int],
     success: bool,
     error: Optional[str],
-    server_used: Optional[str]
+    server_used: Optional[str],
+    prompt: Optional[str] = None
 ):
     """Log API usage to database"""
     try:
+        # Truncate prompt if too long (max 5000 characters)
+        prompt_truncated = prompt[:5000] if prompt and len(prompt) > 5000 else prompt
+        
         usage_log = UsageLog(
             username=username,
             timestamp=datetime.now(timezone.utc),
             model=model,
             endpoint=endpoint,
+            prompt=prompt_truncated,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + (completion_tokens or 0),
@@ -425,7 +430,8 @@ async def generate(
                 duration_ms=duration_ms,
                 success=True,
                 error=None,
-                server_used=server_url
+                server_used=server_url,
+                prompt=request.prompt
             )
             
             return StreamingResponse(
@@ -458,7 +464,8 @@ async def generate(
                 duration_ms=duration_ms,
                 success=True,
                 error=None,
-                server_used=server_url
+                server_used=server_url,
+                prompt=request.prompt
             )
             
             return result
@@ -479,7 +486,8 @@ async def generate(
             duration_ms=duration_ms,
             success=False,
             error=error_msg,
-            server_used=server_url
+            server_used=server_url,
+            prompt=request.prompt
         )
         
         raise HTTPException(status_code=503, detail=f"Backend error: {error_msg}")
@@ -516,6 +524,8 @@ async def chat(
             total_content = " ".join([msg.content for msg in request.messages])
             prompt_tokens = len(total_content.split())
             duration_ms = int((time.time() - start_time) * 1000)
+            # Format messages as prompt string
+            prompt_text = "\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
             
             await log_usage(
                 db=db,
@@ -527,7 +537,8 @@ async def chat(
                 duration_ms=duration_ms,
                 success=True,
                 error=None,
-                server_used=server_url
+                server_used=server_url,
+                prompt=prompt_text
             )
             
             return StreamingResponse(
@@ -548,6 +559,8 @@ async def chat(
             # Log usage
             total_content = " ".join([msg.content for msg in request.messages])
             prompt_tokens = len(total_content.split())
+            # Format messages as prompt string
+            prompt_text = "\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
             
             if "message" in result and "content" in result["message"]:
                 completion_tokens = len(result["message"]["content"].split())
@@ -566,7 +579,8 @@ async def chat(
                 duration_ms=duration_ms,
                 success=True,
                 error=None,
-                server_used=server_url
+                server_used=server_url,
+                prompt=prompt_text
             )
             
             return result
@@ -577,6 +591,7 @@ async def chat(
         
         # Log failed request
         total_content = " ".join([msg.content for msg in request.messages])
+        prompt_text = "\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
         await log_usage(
             db=db,
             username=user.username,
@@ -587,7 +602,8 @@ async def chat(
             duration_ms=duration_ms,
             success=False,
             error=error_msg,
-            server_used=server_url
+            server_used=server_url,
+            prompt=prompt_text
         )
         
         raise HTTPException(status_code=503, detail=f"Backend error: {error_msg}")
@@ -702,58 +718,117 @@ async def get_my_usage(
 @app.get("/admin/usage/{username}")
 async def get_user_usage(
     username: str,
-    days: int = 7,
+    days: int = Query(7, ge=1, le=365, description="Number of days to look back (1-365)"),
+    limit: int = Query(50, ge=1, le=500, description="Number of recent requests to include (1-500)"),
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(verify_admin)
 ):
-    """Get usage statistics for a specific user (admin only)"""
+    """
+    Get usage statistics for a specific user (admin only)
     
-    from datetime import timedelta
+    Returns detailed usage statistics including:
+    - Total requests, successful/failed requests
+    - Token usage statistics
+    - Most used models
+    - Recent requests with prompt content, model, timestamp, and other details
     
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    **Parameters:**
+    - `username`: The username to query usage for
+    - `days`: Number of days to look back (default: 7, range: 1-365)
+    - `limit`: Number of recent requests to include in response (default: 50, range: 1-500)
     
-    result = await db.execute(
-        select(UsageLog)
-        .where(and_(
-            UsageLog.username == username,
-            UsageLog.timestamp >= start_date
-        ))
-        .order_by(UsageLog.timestamp.desc())
-    )
-    logs = result.scalars().all()
+    **Returns:**
+    - Usage statistics summary
+    - Model usage breakdown
+    - Recent requests list with prompt content, model, tokens, duration, etc.
+    """
     
-    if not logs:
-        return {
+    try:
+        # Validate parameters
+        if days < 1 or days > 365:
+            raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=400, detail="limit must be between 1 and 500")
+        
+        # Check if user exists
+        user_result = await db.execute(
+            select(APIKey).where(APIKey.username == username)
+        )
+        user_key = user_result.scalar_one_or_none()
+        
+        if not user_key:
+            raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+        
+        # Calculate date range
+        start_date = datetime.now(timezone.utc) - timedelta(days=days)
+        end_date = datetime.now(timezone.utc)
+        
+        # Query usage logs
+        result = await db.execute(
+            select(UsageLog)
+            .where(and_(
+                UsageLog.username == username,
+                UsageLog.timestamp >= start_date,
+                UsageLog.timestamp <= end_date
+            ))
+            .order_by(UsageLog.timestamp.desc())
+        )
+        logs = result.scalars().all()
+        
+        # Calculate statistics
+        total_requests = len(logs)
+        successful_requests = sum(1 for log in logs if log.success)
+        failed_requests = total_requests - successful_requests
+        total_tokens = sum(log.total_tokens or 0 for log in logs)
+        
+        # Find most used model
+        model_counts = {}
+        for log in logs:
+            model_counts[log.model] = model_counts.get(log.model, 0) + 1
+        most_used_model = max(model_counts.items(), key=lambda x: x[1])[0] if model_counts else None
+        
+        # Prepare recent requests list
+        recent_requests = []
+        for log in logs[:limit]:
+            recent_requests.append({
+                "timestamp": log.timestamp.isoformat(),
+                "model": log.model,
+                "endpoint": log.endpoint,
+                "prompt": log.prompt,
+                "prompt_tokens": log.prompt_tokens,
+                "completion_tokens": log.completion_tokens,
+                "total_tokens": log.total_tokens,
+                "duration_ms": log.duration_ms,
+                "success": log.success,
+                "error": log.error,
+                "server_used": log.server_used
+            })
+        
+        # Prepare response
+        response = {
             "username": username,
             "period_days": days,
-            "total_requests": 0,
-            "message": "No usage data found"
+            "total_requests": total_requests,
+            "successful_requests": successful_requests,
+            "failed_requests": failed_requests,
+            "total_tokens": total_tokens,
+            "avg_tokens_per_request": round(total_tokens / total_requests, 2) if total_requests > 0 else 0.0,
+            "most_used_model": most_used_model,
+            "model_usage": model_counts,
+            "period_start": start_date.isoformat(),
+            "period_end": end_date.isoformat(),
+            "recent_requests": recent_requests
         }
-    
-    total_requests = len(logs)
-    successful_requests = sum(1 for log in logs if log.success)
-    failed_requests = total_requests - successful_requests
-    total_tokens = sum(log.total_tokens for log in logs)
-    
-    # Find most used model
-    model_counts = {}
-    for log in logs:
-        model_counts[log.model] = model_counts.get(log.model, 0) + 1
-    most_used_model = max(model_counts.items(), key=lambda x: x[1])[0] if model_counts else None
-    
-    return {
-        "username": username,
-        "period_days": days,
-        "total_requests": total_requests,
-        "successful_requests": successful_requests,
-        "failed_requests": failed_requests,
-        "total_tokens": total_tokens,
-        "avg_tokens_per_request": total_tokens / total_requests if total_requests > 0 else 0,
-        "most_used_model": most_used_model,
-        "model_usage": model_counts,
-        "period_start": start_date.isoformat(),
-        "period_end": datetime.now(timezone.utc).isoformat()
-    }
+        
+        logger.info(f"Admin {admin.username} queried usage for user {username} (period: {days} days, requests: {total_requests})")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting usage for user {username}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

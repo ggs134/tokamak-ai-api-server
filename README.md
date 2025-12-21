@@ -7,7 +7,7 @@
 - 🔐 **인증**: 역할 기반 접근 제어를 지원하는 API 키 기반 인증
 - ⚖️ **로드 밸런싱**: 자동 장애 조치 및 최소 연결 수 기반 로드 밸런싱
 - 🚦 **속도 제한**: SQLite 기반 사용자별 속도 제한
-- 📊 **사용량 추적**: 상세한 사용량 통계 및 로깅
+- 📊 **사용량 추적**: 상세한 사용량 통계, 프롬프트 내용 저장 및 로깅
 - 🏥 **헬스 체크**: 자동 백엔드 헬스 모니터링
 - 🔄 **스트리밍 지원**: 스트리밍 응답 완전 지원
 - 📈 **관리자 대시보드**: 사용량 분석 및 API 키 관리
@@ -570,7 +570,8 @@ curl http://localhost:8000/usage/me \
   -H "Authorization: Bearer YOUR_API_KEY"
 
 # 사용자 사용량 (관리자 전용)
-curl http://localhost:8000/admin/usage/developer1?days=7 \
+# days: 조회 기간 (일), limit: 최근 요청 목록 개수
+curl "http://localhost:8000/admin/usage/developer1?days=7&limit=10" \
   -H "Authorization: Bearer YOUR_ADMIN_KEY"
 ```
 
@@ -672,8 +673,8 @@ LOG_FILE=/var/log/tokamak-ai-api/server.log    # 로그 파일 경로
 
 sqlite3 tokamak_ai_api.db
 
--- 최근 요청 보기
-SELECT username, model, endpoint, total_tokens, duration_ms, success, timestamp
+-- 최근 요청 보기 (프롬프트 내용 포함)
+SELECT username, model, endpoint, prompt, total_tokens, duration_ms, success, timestamp
 FROM usage_logs
 ORDER BY timestamp DESC
 LIMIT 20;

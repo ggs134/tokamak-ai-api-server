@@ -463,11 +463,12 @@ curl http://localhost:8000/usage/me \
 특정 사용자의 사용량 통계를 조회합니다. **관리자 권한 필요**
 
 **쿼리 파라미터:**
-- `days` (선택): 조회할 일수 (기본값: 7)
+- `days` (선택): 조회할 일수 (기본값: 7, 범위: 1-365)
+- `limit` (선택): 최근 요청 목록 개수 (기본값: 50, 범위: 1-500)
 
 **요청 예시:**
 ```bash
-curl "http://localhost:8000/admin/usage/developer1?days=30" \
+curl "http://localhost:8000/admin/usage/developer1?days=30&limit=10" \
   -H "Authorization: Bearer sk-your-admin-key"
 ```
 
@@ -475,16 +476,74 @@ curl "http://localhost:8000/admin/usage/developer1?days=30" \
 ```json
 {
   "username": "developer1",
+  "period_days": 30,
   "total_requests": 150,
   "successful_requests": 148,
   "failed_requests": 2,
   "total_tokens": 45000,
   "avg_tokens_per_request": 300.0,
-  "most_used_model": "gpt-oss:20b",
-  "period_start": "2025-12-09T06:56:01.780714Z",
-  "period_end": "2025-12-16T06:56:01.780714Z"
+  "most_used_model": "gemma3:4b",
+  "model_usage": {
+    "gemma3:4b": 120,
+    "llama3.1:8b": 30
+  },
+  "period_start": "2025-11-21T06:56:01.780714Z",
+  "period_end": "2025-12-21T06:56:01.780714Z",
+  "recent_requests": [
+    {
+      "timestamp": "2025-12-21T06:55:30.123456Z",
+      "model": "gemma3:4b",
+      "endpoint": "generate",
+      "prompt": "What is machine learning?",
+      "prompt_tokens": 4,
+      "completion_tokens": 250,
+      "total_tokens": 254,
+      "duration_ms": 1234,
+      "success": true,
+      "error": null,
+      "server_used": "http://192.168.50.180:11434"
+    },
+    {
+      "timestamp": "2025-12-21T06:54:15.789012Z",
+      "model": "gemma3:4b",
+      "endpoint": "chat",
+      "prompt": "user: Hello\nassistant: Hi there!",
+      "prompt_tokens": 5,
+      "completion_tokens": 180,
+      "total_tokens": 185,
+      "duration_ms": 987,
+      "success": true,
+      "error": null,
+      "server_used": "http://192.168.50.180:11434"
+    }
+  ]
 }
 ```
+
+**응답 필드 설명:**
+- `username`: 사용자 이름
+- `period_days`: 조회 기간 (일)
+- `total_requests`: 총 요청 수
+- `successful_requests`: 성공한 요청 수
+- `failed_requests`: 실패한 요청 수
+- `total_tokens`: 총 사용 토큰 수
+- `avg_tokens_per_request`: 요청당 평균 토큰 수
+- `most_used_model`: 가장 많이 사용한 모델
+- `model_usage`: 모델별 사용 횟수 (딕셔너리)
+- `period_start`: 조회 기간 시작 시간 (ISO 8601)
+- `period_end`: 조회 기간 종료 시간 (ISO 8601)
+- `recent_requests`: 최근 요청 목록 (배열)
+  - `timestamp`: 요청 시간
+  - `model`: 사용한 모델 이름
+  - `endpoint`: 엔드포인트 (`generate` 또는 `chat`)
+  - `prompt`: 호출한 프롬프트 내용 (최대 5000자, chat의 경우 메시지 포맷)
+  - `prompt_tokens`: 프롬프트 토큰 수
+  - `completion_tokens`: 응답 토큰 수
+  - `total_tokens`: 총 토큰 수
+  - `duration_ms`: 응답 시간 (밀리초)
+  - `success`: 성공 여부
+  - `error`: 에러 메시지 (실패한 경우)
+  - `server_used`: 사용한 Ollama 서버 URL
 
 ---
 

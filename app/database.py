@@ -24,11 +24,12 @@ class APIKey(Base):
 class UsageLog(Base):
     __tablename__ = "usage_logs"
     
-    id = Column(BigInteger, primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     username = Column(String(100), index=True, nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     model = Column(String(100), nullable=False)
     endpoint = Column(String(50), nullable=False)
+    prompt = Column(Text, nullable=True)  # Store prompt content
     prompt_tokens = Column(Integer, default=0)
     completion_tokens = Column(Integer, nullable=True)
     total_tokens = Column(Integer, default=0)
